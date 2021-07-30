@@ -920,9 +920,6 @@ t_src = 'temperature'
 
 ###### Violin plots #######
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'anom', 1.5, 'XGB')
-partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'rf', 'anom', 1.5, 'XGB')
-partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'ir', 'anom', 1.5, 'XGB')
-
 
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'anom', 1.5, 'RF')
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'detrended_anom', 1.5, 'XGB')
@@ -933,13 +930,6 @@ partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', 'r
 ##### Partial dependence 2D global ######
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', irrig, 'anom', 'XGB')
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', irrig, 'anom', 'XGB')
-
-partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', 'rf', 'anom', 'XGB')
-partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', 'rf', 'anom', 'XGB')
-
-partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', 'ir', 'anom', 'XGB')
-partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', 'ir', 'anom', 'XGB')
-
 
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', irrig, 'anom', 'RF')
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', irrig, 'anom', 'RF')

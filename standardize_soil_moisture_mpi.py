@@ -163,7 +163,7 @@ if __name__ == '__main__':
     main(run_location['cluster'], 'era', '90', comm, size, rank)
     main(run_location['cluster'], 'era', 'real', comm, size, rank)            
 
-    # main(run_location['cluster'], 'gleam', '90', comm, size, rank)
+    main(run_location['cluster'], 'gleam', '90', comm, size, rank)
     
     
     

@@ -1074,7 +1074,8 @@ if __name__== "__main__":
     run_location = {'cluster': '/scratch/work/heinom2/',
                     'local_d': 'D:/work/',
                     'local_c': 'C:/Users/heinom2/'}
-    
+
+# #############################################
     # path = run_location['local_c']
     # rank = 3
     # size = 8
@@ -1088,6 +1089,7 @@ if __name__== "__main__":
     # y_src = 'ray'
     # model_type = 'XGB'
     # N_bins = 1
+# #############################################
     
     path = run_location['cluster'] # get root path
     
@@ -1097,7 +1099,8 @@ if __name__== "__main__":
     rank = comm.Get_rank()
     
     if rank < 4:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 101)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 1)
+        # main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 101)
     elif rank < 8:
         main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'iizumi', 'XGB', 1)
         main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'detrended_anom', '90',   100, 'ray',    'XGB', 1)
