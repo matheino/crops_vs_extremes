@@ -120,10 +120,11 @@ def main(run_location, gs, comm, size, rank):
     
     # initialize lists for annual aggregates
     T_avg_mean = []
+    T_year_avg = []
     P_gs_sum = []
     P_year_sum = []
-    wind_mean = []
-    wind_max = []
+#    wind_mean = []
+#    wind_max = []
     
     os.chdir(path+'research/crop_failures/data/temp_precip_wind_data_jan2021') # set output path
     
@@ -161,9 +162,10 @@ def main(run_location, gs, comm, size, rank):
         T_max = combine_annual_data(path, interp_points, year, 'tmax', latitude_new, longitude_new, crop, irrig,  gs)
         T_min = combine_annual_data(path, interp_points, year, 'tmin', latitude_new, longitude_new, crop, irrig, gs)
         T_avg = combine_annual_data(path, interp_points, year, 'tavg', latitude_new, longitude_new, crop, irrig, gs)
+        T_year = combine_annual_data(path, interp_points, year, 'tavg', latitude_new, longitude_new, crop, irrig, '365')
         P_gs = combine_annual_data(path, interp_points, year, 'prate', latitude_new, longitude_new, crop, irrig, gs)
         P_year = combine_annual_data(path, interp_points, year, 'prate', latitude_new, longitude_new, crop, irrig, '365')
-        wind = combine_annual_data(path, interp_points, year, 'wndspd', latitude_new, longitude_new, crop, irrig, gs)
+#        wind = combine_annual_data(path, interp_points, year, 'wndspd', latitude_new, longitude_new, crop, irrig, gs)
 
         # here, when sinusodially interpolated, amplitude is half of the difference between max and min temperatures
         T_amplitude = ((T_max-T_min)/2)
@@ -189,20 +191,22 @@ def main(run_location, gs, comm, size, rank):
         
         # calculate annual values for average temperature, precipitaion and wind speed
         T_avg_mean.append(np.nanmean(T_avg, axis = 0))
+        T_year_avg.append(np.nanmean(T_year, axis = 0))
         P_gs_sum.append(np.nansum(P_gs, axis = 0))
         P_year_sum.append(np.nansum(P_year, axis = 0))
-        wind_mean.append(np.nanmean(wind, axis = 0))
-        wind_max.append(np.nanmax(wind, axis = 0))        
+#        wind_mean.append(np.nanmean(wind, axis = 0))
+#        wind_max.append(np.nanmax(wind, axis = 0))        
         
         print('rank',rank,'year '+str(year)+' took '+str(time.time()-start_t_yr)+' to run')          
         sys.stdout.flush()
     
     # format and temperature, precipitaion and wind speed data for exporting
     T_avg_out = np.stack(T_avg_mean, axis=2)
+    T_year_avg_out = np.stack(T_year_avg, axis=2)
     P_gs_out = np.stack(P_gs_sum, axis=2)
     P_year_out = np.stack(P_year_sum, axis=2)
-    wind_mean_out = np.stack(wind_mean, axis=2)
-    wind_max_out = np.stack(wind_max, axis=2)
+#    wind_mean_out = np.stack(wind_mean, axis=2)
+#    wind_max_out = np.stack(wind_max, axis=2)
 
     # for the precipitation data, set values to nan if they are zero for all years
     P_gs_out[np.all(P_gs_out == 0, axis = 2 ), ...] = np.nan
@@ -211,10 +215,11 @@ def main(run_location, gs, comm, size, rank):
     # export data
     os.chdir(path+'research/crop_failures/data/temp_precip_wind_data_jan2021')
     pickle.dump(T_avg_out, lzma.open('Tavg_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
+    pickle.dump(T_year_avg_out, lzma.open('Tyear_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
     pickle.dump(P_gs_out, lzma.open('P_gs_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
     pickle.dump(P_year_out, lzma.open('P_year_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
-    pickle.dump(wind_mean_out, lzma.open('wind_mean_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
-    pickle.dump(wind_max_out, lzma.open('wind_max_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
+#    pickle.dump(wind_mean_out, lzma.open('wind_mean_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
+#    pickle.dump(wind_max_out, lzma.open('wind_max_'+irrig+'_'+crop+'_gs'+str(gs)+'.pkl.lzma', 'wb' ) )
 
     print('AgMERRA rank',rank,'finished')          
     sys.stdout.flush()

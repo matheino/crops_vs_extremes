@@ -71,58 +71,6 @@ def get_crop_and_irrig_list(rank,size):
     return crop_list, irrig_list
 
 
-def import_climate_bin_data(path, filename, irrig_mask):
-        
-    #path = r'D:\work\data\earthstat\YieldGapMajorCrops_Geotiff\YieldGapMajorCrops_Geotiff\maize_yieldgap_geotiff'
-        
-    import rasterio
-    from scipy.interpolate import griddata
-
-    # import climate bin data as a numpy array
-    with rasterio.open(os.path.join(path, filename)) as raster:
-        array = raster.read().squeeze().reshape(-1)        
-        meta = raster.meta.copy()
-    
-    # initialize latitude and longitude vectors corresponding to 0.0833deg resolution
-    latitude_orig = np.linspace(90-1/12, -90+1/12, 2160)
-    longitude_orig = np.linspace(-180+1/12, 180-1/12, 4320)
-    
-    # create a 0.0833deg latitude-longitude mesh based to be used in the interpolation later
-    mesh_orig = np.array(np.meshgrid(longitude_orig, latitude_orig))
-    points_orig = np.rollaxis(mesh_orig, 0, 3).reshape((latitude_orig.shape[0]*longitude_orig.shape[0], 2))
-    points_orig = np.flip(points_orig, axis = 1)
-    
-    # remove no-value cells from the raw climate bin as well as coordinate data
-    is_nan = array == 0
-    
-    array = array[~is_nan]
-    points_orig = points_orig[~is_nan,:]
-    
-    # initialize latitude and longitude vectors corresponding to 0.5deg resolution
-    latitude_new = np.linspace(89.75,-89.75,360)
-    longitude_new = np.linspace(-179.75,179.75,720)
-    
-    # create a 0.5deg latitude-longitude mesh based to be used in the interpolation later
-    interp_mesh = np.array(np.meshgrid(longitude_new, latitude_new))
-    interp_points = np.rollaxis(interp_mesh, 0, 3).reshape((latitude_new.shape[0]*longitude_new.shape[0], 2))
-    interp_points_new = np.flip(interp_points, axis = 1)      
-    
-    # interpolate new values to 0.5 degree resolution and across the whole globe
-    array_filled = griddata(points_orig, array, interp_points_new, method = 'nearest')
-    
-    array_filled = array_filled.reshape(360,720)
-    
-    # import cartopy.crs as ccrs
-    # ax = plt.axes(projection=ccrs.Robinson())
-    # ax.coastlines(linewidth = 0.5)
-    # plt.pcolormesh(lon, lat, array, transform=ccrs.PlateCarree())        
-    
-    # change values where no irrigation data is available to zero (i.e. no value / nan)
-    array_filled[~irrig_mask[... , 0]] = 0
-    
-    return array_filled
-
-
 def plot_table_to_raster(raster_info, df, var, lon_ext = (-180, 180), lat_ext = (-60, 90), clim = None, mask = None, scico = None, label_name = None, title = None, cbar = False, norm = None):
     
     import cartopy.crs as ccrs
@@ -165,7 +113,7 @@ def plot_table_to_raster(raster_info, df, var, lon_ext = (-180, 180), lat_ext = 
     
     # define colormap
     if scico is not None:
-        cmap = get_scico_colormap(scico, 'C:/Users/heinom2/')
+        cmap = get_scico_colormap(scico, 'C:/Users/heinom2/OneDrive - Aalto University/')
     else:
         cmap = 'viridis'
 

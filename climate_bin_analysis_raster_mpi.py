@@ -456,20 +456,16 @@ def obtain_clim_ref(dtype, gs, crop, irrig, years, perc_max, perc_min, path):
     # find the corresponding digitization to the minimum and maximum percentiles given as input to the function,
     # also check that the other type of exterme has values for each grid cell
     if perc_min == 0.9 and perc_max == 1.0:   
-        dig_v = [10, 9, 1, 2]
+        dig_v = [10, 1]
 
     elif perc_min == 0.0 and perc_max == 0.1:
-        dig_v = [1, 2, 10, 9]
+        dig_v = [1, 10]
     
     # find the the percentile threshold for the scenario in question
     data_bool = data_cumulative_digitized == dig_v[0]
-    # if the initial threshold cannot be defined, use the next percentile (higher / lower, depending on the scnenario) 
-    data_bool[data_bool.sum(2) == 0, ...] = data_cumulative_digitized[data_bool.sum(2) == 0, ...] == dig_v[1]
     
     # find the the percentile threshold for the reference scenario
-    data_bool_ref = data_cumulative_digitized == dig_v[2]
-    # if the threshold cannot be defined, use the next percentile (higher / lower, depending on the scnenario)
-    data_bool_ref[data_bool_ref.sum(2) == 0, ...] = data_cumulative_digitized[data_bool_ref.sum(2) == 0, ...] == dig_v[3]
+    data_bool_ref = data_cumulative_digitized == dig_v[1]
     
     mask_ref = data_bool_ref.sum(2) == 0
     
@@ -484,34 +480,6 @@ def obtain_clim_ref(dtype, gs, crop, irrig, years, perc_max, perc_min, path):
     
     bin_max = np.nanmax(bin_array, axis = 2)
     bin_min = np.nanmin(bin_array, axis = 2)
-   
-    # #########################################
-    # ### plot data to check that it behaves expectedly ###
-    # data_cumulative_new = data_cumulative.copy()
-    # data_cumulative_new[~data_bool] = np.nan
-    
-    # for i in range(0,360): # range(150,250):
-    #     for j in range(0,720): # range(200,300):
-            
-    #         x = data_cumulative[i,j,:]
-            
-    #         y = data_cumulative_new[i,j,:]
-            
-    #         mask_i = mask_out[i,j]
-            
-    #         if np.nansum(x) > 0 and mask_i:
-    #             print(i)
-    #             print(j)
-    #             plt.scatter(np.arange(x.shape[0]), x, s = 3)
-    #             plt.ylim(0,1)
-    #             plt.show()
-    #             plt.scatter(np.arange(x.shape[0]), y, s  = 3)
-    #             plt.ylim(0,1)
-    #             plt.show()
-
-    # plt.imshow(data_cumulative[:,:,0]>0.1)
-    # plt.colorbar()
-    # ######################################
     
     return data_bool, bin_min, bin_max, mask_out
 
@@ -573,146 +541,270 @@ def number_of_days_vs_ref(path, dtype, gs, crop, years, irrig, stdz, perc_max = 
          return days_summed_out
 
 
-def isolate_bin_data(data, bin_bool, bin_id, years, dtype, not_nan = None):
+def raster_to_df(data, years, dtype):
     
     # reshape rasterized data to tabulated format, each row represents one cell
     data_table = data.reshape(360*720,-1)
-    
-    # remove cells with nans and outside the inspected climate zone
-    data_table = data_table[np.all([bin_bool, not_nan], axis = 0),:]
-    
-    # create a cell id variable for each cell, mask that data similarly as the data above
-    cell_id = np.arange(0,360*720,1)[np.all([bin_bool, not_nan], axis = 0)]
+
+    # create a cell id variable for each cell
+    cell_id = np.arange(0,360*720,1)
     
     # create a pandas dataframe of the data
-    df = pd.DataFrame(data_table, columns = years)
-    df['cell_id'] = cell_id
+    if years[0] == None:
+        df_long = pd.DataFrame(data_table, columns = [dtype])
+        df_long['cell_id'] = cell_id
     
-    # change dataframe format to long, meaning that each row is one observation
-    df_long =  pd.melt(df, id_vars = 'cell_id', var_name = 'year', value_name = dtype).sort_values('year')
+    else:
+        df = pd.DataFrame(data_table, columns = years)
+        df['cell_id'] = cell_id
+        
+        # change dataframe format to long, meaning that each row is one observation
+        df_long =  pd.melt(df, id_vars = 'cell_id', var_name = 'year', value_name = dtype).sort_values('year')
 
     return df_long
 
 
-def calculate_climate_vs_crop_failures(path,
-                                        crop,
-                                        model_in,
-                                        bin_id,
-                                        bin_raster,
-                                        crop_data_yield,
-                                        crop_data_ha,
-                                        irrig_mask,
-                                        variables,
-                                        var_names,
-                                        clim_years,
-                                        N_folds,
-                                        cmap,
-                                        plot = True,
-                                        N = 100):
+def import_climate_zone_data(crop_data_is_nan, T_tot, P_tot):
     
-   
-    # bin_id = 0
+    # create climate zoning used in the analyses
+    
+    # calculate the average temperature and precipitation across the whole time period studied
+    T_tot = np.nanmean(T_tot,2)
+    P_tot = np.nanmean(P_tot,2)
 
+    # vectorize the data
+    T_tot_v = T_tot.reshape(-1)
+    P_tot_v = P_tot.reshape(-1)
+    
+    # check which cells have data
+    PT_is_na = np.any([np.isnan(T_tot_v), np.isnan(P_tot_v), crop_data_is_nan], axis = 0)
+
+    # remove cells without data in any of the two data sets (P and T)
+    T_tot_v = T_tot_v[~PT_is_na]
+    P_tot_v = P_tot_v[~PT_is_na]
+    
+    # divide temperature into quintiles
+    T_perc = np.percentile(T_tot_v, np.linspace(0,100,6))
+    T_perc[-1] = T_perc[-1]+1 # increase last value by one to have it included in in the intervalling
+    T_tot_vq = np.digitize(T_tot_v, T_perc)
+    
+    # initialize a climate zone array
+    clim_zones_vq = np.zeros_like(T_tot_vq)
+    
+    # loop across the temperature quintiles
+    for cat in np.unique(T_tot_vq):
+        
+        # obtain the values in the precipitation that belong to the temperature quintile in question
+        P_tot_v_temp = P_tot_v[T_tot_vq == cat]
+        
+        # split values into quintiles based on precipitation
+        P_temp_perc = np.percentile(P_tot_v_temp, np.linspace(0,100,6))
+        P_temp_perc[-1] = P_temp_perc[-1]+1
+        
+        # categorize values based on temperature and precipitation
+        P_temp_q = np.digitize(P_tot_v_temp, P_temp_perc)+(cat-1)*10
+        
+        # save those values to the climate zone array
+        clim_zones_vq[T_tot_vq == cat] = P_temp_q
+    
+    # list of data to export
+    data_list = [clim_zones_vq, T_tot_v, P_tot_v]
+    
+    # put the climate zone array, as well as temperature and precipitation arrays
+    # to a global map
+    data_out = []
+    for temp in data_list:      
+        temp_out = np.zeros(360*720)
+        temp_out[~PT_is_na] = temp
+        temp_out[PT_is_na] = np.nan
+        temp_out = temp_out.reshape(360,720)
+        data_out.append(temp_out)
+    
+    return tuple(data_out)
+
+
+def combine_data_to_dataframe(crop_data_yield, crop_data_ha, clim_variables, var_names, T_tot, P_tot, irrig_mask, clim_years):
+    
     # obtain information about years with crop yield data (varies between iizumi and ray data sets)
     crop_years = crop_data_yield['time'].values
-          
-    # create a boolean vector based on bin_id and climate zones
-    if bin_id > 0:
-        bin_bool = (bin_raster == bin_id).reshape(-1)
-    elif bin_id == 0:
-        bin_bool = (bin_raster > bin_id).reshape(-1)
            
     # de-trended crop yield data as numpy array
     crop_data_dtnd_values = np.copy(crop_data_yield['detrended_yield'].values)
     
     # first mask with irrigation extent
     crop_data_dtnd_values[~irrig_mask[...,0], ...] = np.nan
-    
-    # find cells with numeric values for all years
-    not_nan = np.all(~np.isnan(crop_data_dtnd_values.reshape(360*720,-1)),axis = 1)
+    any_is_nan_yield = np.any(np.isnan(crop_data_dtnd_values), axis = 2)
+    crop_data_dtnd_values[any_is_nan_yield, ...] = np.nan
     
     # crop yield data to tabulated format
-    df_combined = isolate_bin_data(crop_data_dtnd_values, bin_bool, bin_id, crop_years, 'Crop yield anomaly', not_nan)
+    df_combined = raster_to_df(crop_data_dtnd_values, crop_years, 'Crop yield anomaly')
     
     # harvested areas data to tabulated format
     crop_data_ha_values = np.copy(crop_data_ha['harvested_area'].sel(time = crop_years).values)
+    crop_data_ha_values[~irrig_mask[...,0], ...] = np.nan
     any_is_nan_ha = np.any(np.isnan(crop_data_ha_values), axis = 2)
 
     crop_data_ha_values[any_is_nan_ha, ...] = np.nan
     
-    df_ha = isolate_bin_data(crop_data_ha_values, bin_bool, bin_id, crop_years, 'harvested_area', not_nan)
+    # harevested areas data to tabulated format
+    df_ha = raster_to_df(crop_data_ha_values, crop_years, 'harvested_area')
 
     # merge yield and harvested areas dataframes    
     df_combined = df_combined.merge(df_ha, on = ('cell_id', 'year'))
 
     # combine the climate variables to the dataframe
-    for i, var in enumerate(variables, 0):
-        df_temp = isolate_bin_data(var, bin_bool, bin_id, clim_years, var_names[i], not_nan)        
+    for i, var in enumerate(clim_variables, 0):
+        df_temp = raster_to_df(var, clim_years, var_names[i])        
         df_combined = df_combined.merge(df_temp, on = ('cell_id', 'year'))
-             
+    
+    crop_data_is_nan = np.any([any_is_nan_ha.reshape(-1), any_is_nan_yield.reshape(-1)], axis = 0)
+    clim_zones = import_climate_zone_data(crop_data_is_nan, T_tot, P_tot)
+    
+    clim_zone_names = ['climate_zone', 'climzone_temperature','climzone_precipitation']
+    # combine the climate zone variables to the dataframe
+    for i, var in enumerate(clim_zones, 0):
+        df_temp = raster_to_df(var, [None], clim_zone_names[i])        
+        df_combined = df_combined.merge(df_temp, on = ('cell_id'))
+    
     # drop the row if there's any variable without an observation
     df_combined = df_combined.dropna(how = 'any')
-    
-    # select variables to include in the regression
-    var_names = ['Crop yield anomaly'] + var_names
-     
-    # change dataframe to numpy array
-    yX = df_combined[var_names].values
-    
-    y = yX[:,0] # target variable (de-trended crop yield)
-    X = yX[:,1:] # explanatory variables (climate data)
-    
-    years_all = df_combined['year'].values
-    cell_id = df_combined['cell_id'].values
-    
-    df_ha_2000 = df_combined.loc[df_combined['year'] == 2000][['cell_id','harvested_area']]
-    
-    # for global data, calculate a correlation matrix
-    if bin_id == 0 and plot:
-        import seaborn as sns
-        df_corr = df_combined[var_names].corr(method = 'pearson')
-        
-        ax = sns.heatmap(
-            df_corr, 
-            vmin=-1.00, vmax=1.00, center=0,
-            cmap=sns.diverging_palette(20, 220, n=200),
-            square=True,
-            cbar = False,
-            xticklabels = rank == 2,
-            yticklabels = rank == 2
-        )
-        ax.set_xticklabels(
-            ax.get_xticklabels(),
-            rotation=45,
-            horizontalalignment='right'
-        );
 
-        ax.tick_params(length=0)        
-        os.chdir(os.path.join(path, 'research/crop_failures/results/shap_and_cor_figs2021'))
-        plt.savefig(crop+'_correlation_matrix.png', dpi = 300, bbox_inches = 'tight')
-        plt.show()
-        
-        if crop == 'maize':
-            ax = sns.heatmap(
-                df_corr, 
-                vmin=-1.00, vmax=1.00, center=0,
-                cmap=sns.diverging_palette(20, 220, n=200),
-            )
-            plt.gca().set_visible(False)
-            colorbar = ax.collections[0].colorbar
-            plt.savefig('correlation_colorbar.png', dpi = 300, bbox_inches = 'tight')
-            plt.show()
+    return df_combined
+
+
+def model_with_optimal_hyperparameters(X, y, ha, years_all, model_type, N_folds, parameters = None):
     
+    # function for exploring the hyperparameter space of the XGBoost model
+    
+    from sklearn.model_selection import RandomizedSearchCV
+    
+    # initialize the models
+    model_dict = {'XGB': xgb.XGBRegressor(base_score=0.5, booster='gbtree', importance_type = 'gain',
+                                          missing = None, n_jobs = 1, nthreads = None, random_state = 0,
+                                          seed = None),
+                  'RF':  RandomForestRegressor() }
+    
+    model_in = model_dict[model_type]
+    
+    # if hyperparameterspace is not explored return default model
+    if parameters != 'optimal':
+
+        model = model_in.set_params(**parameters)
+        
+        return model
+    
+    # define the hyperparamter space explored with the XGBoost model    
+    elif parameters == 'optimal' and model_type == 'XGB':
+
+        parameters = {
+          'objective':['reg:squarederror'],
+          'learning_rate': [0.1],
+          'n_estimators': [400],
+          'max_depth': [3],
+          'min_child_weight': [1],
+          'subsample': [0.5, 0.6, 0.7, 0.8, 0.9, 1],
+          'colsample_bytree': [0.5, 0.6, 0.7, 0.8, 0.9, 1],
+          'colsample_bylevel': [1],
+          'colsample_bynode': [1],
+          'gamma': [0, 0.01, 0.02, 0.03, 0.04, 0.05],
+          'reg_alpha': [0],
+          'reg_lambda': [0.5, 0.75, 1, 1.25, 1.5],
+          'max_delta_step': [0],
+          'scale_pos_weight': [1],
+          'verbosity': [1]
+          }
+        
+
+    df_scores = pd.DataFrame()
+    
+    # randomly split years of data to N_folds number of categories
+    years_unique = np.unique(years_all)
+    np.random.shuffle(years_unique) # shuffle the unique years in the data set with an inplace function
+    years_test_shuffle = np.array_split(years_unique, 3)
+    
+    year_cats = np.zeros_like(years_all)
+    year_cats[np.isin(years_all, years_test_shuffle[0])] = 0
+    year_cats[np.isin(years_all, years_test_shuffle[1])] = 1
+    year_cats[np.isin(years_all, years_test_shuffle[2])] = 2
+    
+    # use two thirds of the data for model training and a third for evaluating
+    # the training progress
+    cv_year_cats = year_cats[year_cats != 2]
+        
+    X_train = X[year_cats != 2, ...]
+    y_train = y[year_cats != 2]
+    ha_train = ha[year_cats != 2]
+
+    X_val = X[year_cats == 2, ...]
+    y_val = y[year_cats == 2]
+    
+    eval_set = [(X_val, y_val)]
+    
+    # define dictionary for some fitting parameters of the XGBoost model
+    fit_params={'early_stopping_rounds': 40, 
+        'eval_set': eval_set,
+        'verbose': False}
+    
+    # conduct five iterations in the random grid search
+    n_iter = 5
+    
+    # create a list inidcating different cross-validation samples
+    cv_list = [[cv_year_cats != cv_group, cv_year_cats == cv_group]  for cv_group in np.unique(cv_year_cats)]
+
+    # initialize the randomized grid search 
+    xgb_grid = RandomizedSearchCV(model_in,
+        parameters,
+        cv = cv_list,
+        n_jobs = 1,
+        return_train_score = True,
+        n_iter = n_iter,
+        verbose = 0)
+      
+    # fit randomized grid search to find optimal hyperparamterss§
+    xgb_grid.fit(X_train, y_train, **fit_params)
+    
+    model = xgb_grid.best_estimator_
+    
+#        print(xgb_grid.best_params_)
+    
+    return model
+
+
+def calculate_climate_vs_crop_failures(path,
+                                        crop,
+                                        X,
+                                        y,
+                                        ha,
+                                        cell_id,
+                                        clim_zones,
+                                        years_all,
+                                        df_ha_2000,
+                                        parameters,
+                                        clim_zone_id,
+                                        var_names,
+                                        N_folds,
+                                        model_type,
+                                        cmap,
+                                        plot = True,
+                                        N = 100):    
+    
+    # clim_zone_id = 0
+    # create a boolean vector based on clim_zone_id and climate zones
+    if clim_zone_id > 0:
+        X = X[clim_zones == clim_zone_id, :]
+        y = y[clim_zones == clim_zone_id]
+        years_all = years_all[clim_zones == clim_zone_id]
+        ha = ha[clim_zones == clim_zone_id]
+        cell_id = cell_id[clim_zones == clim_zone_id]
+        
     # get the size of the total sample
     sample_size = X.shape[0]
     
     # check how many grid cells fall out due to nan in some of the input data sets
-    if bin_id == 0:
+    if clim_zone_id == 0:
         print('number of sample points and data points compared to crop_yield data:')
         print(sample_size)
-        print(sample_size / (np.sum(not_nan) * np.unique(years_all).shape[0]))
         sys.stdout.flush()
-    
     
     # initialize list for r-squared
     rsq = []
@@ -745,7 +837,13 @@ def calculate_climate_vs_crop_failures(path,
         years_unique = np.unique(years_all)
         np.random.shuffle(years_unique) # shuffle the unique years in the data set with an inplace function
         years_test_shuffle = np.array_split(years_unique, N_folds)
-            
+        
+        year_cats = np.zeros_like(years_all)
+        year_cats[np.isin(years_all, years_test_shuffle[0])] = 0
+        year_cats[np.isin(years_all, years_test_shuffle[1])] = 1
+        year_cats[np.isin(years_all, years_test_shuffle[2])] = 2
+        year_cats[np.isin(years_all, years_test_shuffle[3])] = 3
+        
         # initialize temporary lists /  arrays
         y_dh_temp_out = []
         y_wc_temp_out = []
@@ -759,29 +857,60 @@ def calculate_climate_vs_crop_failures(path,
         
         y_pred_all = np.zeros_like(y)
         
-        
         shap_values_out = []
         pd_eval_out = pd.DataFrame()
-        # loop across the shuffled 
-        for j, years_test in enumerate(years_test_shuffle,0):
+        
+        # loop across the shuffled year categories
+        for j in np.unique(year_cats):
             
-            # initialize the model
-            model = model_in
-            
+            val_j = [3,0,1,2]
+       
             # create a boolean array, with true values for those data points (rows), which belong to the years in question
-            testing_rows = np.isin(years_all, years_test)
+            testing_rows = year_cats == j
+            valid_rows = year_cats == val_j[j]
+            training_rows = np.all([year_cats != j, year_cats != val_j[j]], axis = 0)
             
-            # select those data points (i.e. rows) which belong to the years in question
-            X_train = X[~testing_rows,:]
-            X_test = X[testing_rows,:]
-            y_train = y[~testing_rows]
-                        
-            # fit the model
-            model.fit(X_train, y_train)
+            if model_type == 'XGB':
+                
+                # for fitting the XGBoost model, create three separate data sets for training, and testing 
+                # as well as evaluating the performance of the training
+                X_train = X[training_rows]            
+                y_train = y[training_rows]
+                ha_train = ha[training_rows]
+                years_train = years_all[training_rows]
+                
+                y_val = y[valid_rows]
+                X_val = X[valid_rows]
+                
+                X_test = X[testing_rows,:]
+                y_test = y[testing_rows]
+                
+                # create an evaluation set 
+                eval_set = [(X_val, y_val)]
+                
+                # create the model with 
+                model = model_with_optimal_hyperparameters(X_train, y_train, ha_train, years_train, model_type, N_folds, parameters)
+                                            
+                # fit the model, stop fitting the model when the training performance
+                # as inidcated by eval_set doesn't improve
+                model.fit(X_train, y_train, early_stopping_rounds = 40, eval_set = eval_set, verbose = False)
+                
+            elif model_type == 'RF':
+                
+                X_train = X[~testing_rows]            
+                y_train = y[~testing_rows]
+       
+                X_test = X[testing_rows,:]
+                y_test = y[testing_rows]
+             
+                model = RandomForestRegressor(n_estimators = 50, max_depth = None, min_samples_split = 2, min_samples_leaf = 1)
+                
+                # fit the model
+                model.fit(X_train, y_train)
 
             # use the model to predict crop yield anomaly with the testing variables
             y_pred = model.predict(X_test)
-        
+                        
             # fill the predicted yield values to the 
             y_pred_all[testing_rows] = y_pred
             
@@ -792,26 +921,27 @@ def calculate_climate_vs_crop_failures(path,
                 X_eval = X_train[ind2sel,:]    
             else:
                 X_eval = X_train
-                
-            # calculate shap values
-            X_eval_pd = pd.DataFrame(X_eval, columns = var_names[1:])
-            shap_values = shap.TreeExplainer(model, feature_perturbation = 'tree_path_dependent').shap_values(X_eval_pd)
             
-            # accumulate shap from different training sets
-            shap_values_out.append(shap_values)
-            pd_eval_out = pd_eval_out.append(X_eval_pd)
+            if clim_zone_id == 0 and plot:
+            # calculate shap values
+                X_eval_pd = pd.DataFrame(X_eval, columns = var_names)
+                shap_values = shap.TreeExplainer(model, feature_perturbation = 'tree_path_dependent').shap_values(X_eval_pd)
+                
+                # accumulate shap from different training sets
+                shap_values_out.append(shap_values)
+                pd_eval_out = pd_eval_out.append(X_eval_pd)
             
             # calculate the partial dependecies from the model, for each point defined in the cats_coords variable
             # numbering of the inspected variables - (anomaly in) hot days: 0, dry days: 1, cold days: 2, wet days: 3
-            y_dh_temp = _partial_dependence_brute(model, cats_coords, [0,1], X_eval, response_method = 'auto').reshape(cats.shape[0], cats.shape[0])
-            y_wc_temp = _partial_dependence_brute(model, cats_coords, [2,3], X_eval, response_method = 'auto').reshape(cats.shape[0], cats.shape[0])
-            y_wh_temp = _partial_dependence_brute(model, cats_coords, [0,3], X_eval, response_method = 'auto').reshape(cats.shape[0], cats.shape[0])
-            y_dc_temp = _partial_dependence_brute(model, cats_coords, [2,1], X_eval, response_method = 'auto').reshape(cats.shape[0], cats.shape[0])
+            y_dh_temp = _partial_dependence_brute(model, cats_coords, [0,1], X_eval, response_method = 'auto')[0].reshape(cats.shape[0], cats.shape[0])
+            y_wc_temp = _partial_dependence_brute(model, cats_coords, [2,3], X_eval, response_method = 'auto')[0].reshape(cats.shape[0], cats.shape[0])
+            y_wh_temp = _partial_dependence_brute(model, cats_coords, [0,3], X_eval, response_method = 'auto')[0].reshape(cats.shape[0], cats.shape[0])
+            y_dc_temp = _partial_dependence_brute(model, cats_coords, [2,1], X_eval, response_method = 'auto')[0].reshape(cats.shape[0], cats.shape[0])
             
-            y_h_temp = _partial_dependence_brute(model, cats[:, None], [0], X_eval, response_method = 'auto').reshape(-1)
-            y_d_temp = _partial_dependence_brute(model, cats[:, None], [1], X_eval, response_method = 'auto').reshape(-1)
-            y_c_temp = _partial_dependence_brute(model, cats[:, None], [2], X_eval, response_method = 'auto').reshape(-1)
-            y_w_temp = _partial_dependence_brute(model, cats[:, None], [3], X_eval, response_method = 'auto').reshape(-1)
+            y_h_temp = _partial_dependence_brute(model, cats[:, None], [0], X_eval, response_method = 'auto')[0].reshape(-1)
+            y_d_temp = _partial_dependence_brute(model, cats[:, None], [1], X_eval, response_method = 'auto')[0].reshape(-1)
+            y_c_temp = _partial_dependence_brute(model, cats[:, None], [2], X_eval, response_method = 'auto')[0].reshape(-1)
+            y_w_temp = _partial_dependence_brute(model, cats[:, None], [3], X_eval, response_method = 'auto')[0].reshape(-1)
             
             # a function that changes values that are not within the training data limits to nan
             def filter_nodata(data, cats, mat, x1, x2 = None):
@@ -873,53 +1003,60 @@ def calculate_climate_vs_crop_failures(path,
         # calculate r-squared (i.e. squared correlation coeffcient) multiplied with the sign of the original correlation in case the relationship is negative
         rsq_temp = np.corrcoef(out['y_tot'], out['y_tot_pred'])[0,1]**2 * np.sign(np.corrcoef(out['y_tot'], out['y_tot_pred'])[0,1])
         
-        # plt.scatter(y, y_pred_all, alpha = 0.005)
-        # plt.title(np.corrcoef(y, y_pred_all))
-        # plt.show()
-        
-        # plt.scatter(out['y_tot'], out['y_tot_pred'])
-        # plt.title(rsq_temp)
-        # plt.show()
+#        plt.scatter(y, y_pred_all, alpha = 0.005)
+#        plt.title(np.corrcoef(y, y_pred_all)[0,1])
+#        plt.show()
+#        plt.close()
+#        
+#        plt.scatter(out['y_tot'], out['y_tot_pred'])
+#        plt.title(rsq_temp)
+#        plt.show()
+#        plt.close()
         
         # save r-squared value to a list
         rsq.append(rsq_temp)
         
     
-    # combine shap balues from list to numpy array
-    shap_values_out = np.vstack(shap_values_out)  
-
-    # set directory
-    os.chdir(os.path.join(path, 'research/crop_failures/results/shap_and_cor_figs2021'))
-
-    # shap dependence plot for hot and dry days
-    shap.dependence_plot("Hot days", shap_values_out, pd_eval_out, interaction_index="Dry days", show = False)
-    plt.savefig(crop+'_shap_hot_dry.png', dpi = 300, bbox_inches='tight')
-    plt.show()
+    if clim_zone_id == 0 and plot:
+        # combine shap balues from list to numpy array
+        shap_values_out = np.vstack(shap_values_out)
     
-    # shap dependence plot for cold and wet days
-    shap.dependence_plot("Cold days", shap_values_out, pd_eval_out, interaction_index="Wet days", show = False)    
-    plt.savefig(crop+'_shap_cold_wet.png', dpi = 300, bbox_inches='tight')
-    plt.show()
+        # set directory
+        os.chdir(os.path.join(path, 'research/crop_failures/results/shap_and_cor_figs2021'))
     
-    # shap summary plots for all variables
-    ax = shap.summary_plot(shap_values_out, pd_eval_out, show = False, color_bar = False)
-    fig = plt.gcf()
-    fig.set_figheight(5)
-    fig.set_figwidth(5)
-    ax = plt.gca()
-    ax.set_xlabel('')
-    ax.set_ylabel('')
-    ax.set_xlim(-0.15,0.15)
-    ax.set_xticklabels([])
-    plt.savefig(crop+'_shap_summary.png', dpi = 300, bbox_inches='tight')
-
-    plt.show()
-    
-    if crop == 'maize':
-        ax = shap.summary_plot(shap_values_out, pd_eval_out, show = False)
-        fig = plt.gcf()
-        plt.savefig('info_shap_summary.png', dpi = 300, bbox_inches='tight')
+        # shap dependence plot for hot and dry days
+        shap.dependence_plot("Hot days", shap_values_out, pd_eval_out, interaction_index="Dry days", show = False)
+        plt.savefig(crop+'_shap_hot_dry.png', dpi = 300, bbox_inches='tight')
         plt.show()
+        plt.close()
+        
+        # shap dependence plot for cold and wet days
+        shap.dependence_plot("Cold days", shap_values_out, pd_eval_out, interaction_index="Wet days", show = False)    
+        plt.savefig(crop+'_shap_cold_wet.png', dpi = 300, bbox_inches='tight')
+        plt.show()
+        plt.close()
+        
+        # shap summary plots for all variables
+        ax = shap.summary_plot(shap_values_out, pd_eval_out, show = False, color_bar = False)
+        fig = plt.gcf()
+        fig.set_figheight(5)
+        fig.set_figwidth(5)
+        ax = plt.gca()
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_xlim(-0.15,0.15)
+        ax.set_xticklabels([])
+        plt.savefig(crop+'_shap_summary.png', dpi = 300, bbox_inches='tight')
+    
+        plt.show()
+        plt.close()
+        
+        if crop == 'maize':
+            ax = shap.summary_plot(shap_values_out, pd_eval_out, show = False)
+            fig = plt.gcf()
+            plt.savefig('info_shap_summary.png', dpi = 300, bbox_inches='tight')
+            plt.show()
+            plt.close()
             
     # plt.imshow(y_dh_out[0,:,:]);plt.colorbar();plt.show()
     # plt.plot(y_h_out[0,:]);plt.show()
@@ -932,10 +1069,10 @@ def calculate_climate_vs_crop_failures(path,
     return y_dh_out, y_wc_out, y_wh_out, y_dc_out, y_h_out, y_d_out, y_c_out, y_w_out, rsq_out, sample_size
 
 
-def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_src, model_type, N_bins):
+def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_src, model_type, parameters, N_zones, plot, reduced = False):
     
     sys.path.insert(0, path+'research/crop_failures/scripts/crop_failures')
-    from general_functions import import_climate_bin_data, get_scico_colormap
+    from general_functions import get_scico_colormap
     
 
     # select crop based on rank of MPI run
@@ -950,7 +1087,11 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
 
     # temporal metadata for the climatological data
     clim_years = np.arange(1981,2010,1)
-
+    
+    # import average climate data for climate zoning
+    T_tot = import_other_clim_data('Tavg', '90', crop,irrig, 'no_transformation', path) # average growing season temperature
+    P_tot = import_other_clim_data('P_year', '90', crop,irrig, 'no_transformation', path) # total growing season precipitation
+    
     # import reference climatological data
     sm_mean = import_other_clim_data(sm_src + '_mean', gs, crop,irrig, 'detrended_anom', path) # average growing season soil moisture
     t_mean = import_other_clim_data('Tavg', gs, crop,irrig, 'detrended_anom', path) # average growing season temperature
@@ -964,46 +1105,16 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
     # extreme soil moisture data (i.e. days in growing season above (below) 90th (10th) percentile)
     SM_00_01 = number_of_days_vs_ref(path, sm_src, gs, crop, clim_years, irrig, transformation, perc_min = 0.0, perc_max = 0.1)
     SM_09_10 = number_of_days_vs_ref(path, sm_src, gs, crop, clim_years, irrig, transformation, perc_min = 0.9, perc_max = 1.0)
-
+    
     # create a python list of all the variables
-    vars_all = [T_09_10, SM_09_10, T_00_01, SM_00_01, sm_mean[:,:,:-1], t_mean[:,:,:-1], P_year[:,:,:-1], P_gs[:,:,:-1]]
-    vars_all_names = ['Hot days','Dry days','Cold days','Wet days','Soil moisture','Temperature','Precipitation (yearly)','Precipitation']
+    if reduced:
+        vars_all = [T_09_10, SM_09_10, T_00_01, SM_00_01]
+        vars_all_names = ['Hot days','Dry days','Cold days','Wet days']
+    else:
+        vars_all = [T_09_10, SM_09_10, T_00_01, SM_00_01, sm_mean[:,:,:-1], t_mean[:,:,:-1], P_year[:,:,:-1], P_gs[:,:,:-1]]
+        vars_all_names = ['Hot days','Dry days','Cold days','Wet days','Soil moisture','Temperature','Precipitation (yearly)','Precipitation']
     print('Climate data finished: '+ str(rank))
     sys.stdout.flush()
-
-    # import climate bin data
-    path_bin_raster = os.path.join(path, 'data/earthstat/YieldGapMajorCrops_Geotiff/YieldGapMajorCrops_Geotiff/'+crop+'_yieldgap_geotiff')
-    climate_bins = import_climate_bin_data(path_bin_raster, crop+'_binmatrix.tif', mirca_mask[irrig])
-
-    # define plotting setup
-    plot = False
-    cmap = get_scico_colormap('flipvik', path)
-    
-    # select which ML model to use
-    if model_type == 'XGB':
-        model_in = xgb.XGBRegressor(base_score=0.5, booster='gbtree', colsample_bylevel=1,
-                     colsample_bynode=1, colsample_bytree=1, gamma=0,
-                     importance_type='gain', learning_rate=0.1, max_delta_step=0,
-                     max_depth=3, min_child_weight=1, missing=None, n_estimators=100,
-                     n_jobs=1, nthread=None, objective='reg:squarederror', random_state=0,
-                     reg_alpha=0, reg_lambda=1, scale_pos_weight=1, seed=None,
-                     silent=None, subsample=1, verbosity=1)
-    
-    elif model_type == 'RF':  
-        model_in = RandomForestRegressor()
-    
-    # initialize output variables
-    rsq_all = np.zeros((N_bins,N))*np.nan # r-squared
-    sample_size_all = np.zeros(N_bins)*np.nan # sample size
-    y_dh_all = np.zeros((N,25,25,N_bins))*np.nan # partial dependency (anomaly in hot / dry days)
-    y_wc_all = np.zeros((N,25,25,N_bins))*np.nan # partial dependency (anomaly in wet / cold days)
-    y_dc_all = np.zeros((N,25,25,N_bins))*np.nan # partial dependency (anomaly in cold / dry days)
-    y_wh_all = np.zeros((N,25,25,N_bins))*np.nan # partial dependency (anomaly in hot / wet days)
-    
-    y_h_all = np.zeros((N,25,N_bins))*np.nan # partial dependency (anomaly in hot days)
-    y_d_all = np.zeros((N,25,N_bins))*np.nan # partial dependency (anomaly in dry days)
-    y_c_all = np.zeros((N,25,N_bins))*np.nan # partial dependency (anomaly in cold days)
-    y_w_all = np.zeros((N,25,N_bins))*np.nan # partial dependency (anomaly in wet days)
     
     # import crop yield and harvested areas data
     crop_data_fun_dict = {'ray': import_ray_crop_data,
@@ -1011,30 +1122,57 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
 
     crop_data_yield = crop_data_fun_dict[y_src](path, crop)
     crop_data_ha = crop_data_fun_dict['ray'](path, crop)
-
-# ############################################
-    # irrig_mask = mirca_mask['combined']
-    # bin_raster = climate_bins
-    # crop_data = crop_data_yield
-    # # variables = vars_all
-    # test_sz = 0.25
-    # irrig_mask = np.tile(irrig_mask, (1,1,crop_data['time'].shape[0]))
-    # variables = [T_09_10, SM_09_10, T_00_01, SM_00_01, sm_mean[:,:,:-1], t_mean[:,:,:-1], P_year[:,:,:-1], P_gs[:,:,:-1]]
-    # years = np.arange(1981,2011,1)[:-1]
-    # var_names = vars_all_names
-# #############################################
     
+    # combine all data into a pandas dataframe
+    df_combined = combine_data_to_dataframe(crop_data_yield, crop_data_ha, vars_all, vars_all_names, T_tot, P_tot, mirca_mask[irrig], clim_years)
+    
+    # save dataframe if run is for all variables
+    if not reduced:
+        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out'))
+        df_combined.to_csv(y_src+'_'+crop+'_'+t_src+'_'+sm_src+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
+    
+    # select variables to include in the regression
+    # change dataframe to numpy array    
+    y = df_combined['Crop yield anomaly'].values # target variable (de-trended crop yield)
+    X = df_combined[vars_all_names].values # explanatory variables (climate data)
+    years_all = df_combined['year'].values
+    clim_zones = df_combined['climate_zone'].values
+    cell_id = df_combined['cell_id'].values
+    ha = np.log10(1+df_combined['harvested_area'].values)
+    df_ha_2000 = df_combined.loc[df_combined['year'] == 2000][['cell_id','harvested_area']]
+
     # define how many temporal splits are made in the training-prediction procedure
     N_folds = 4
     
+    # define plotting setup
+    plot = False
+    cmap = get_scico_colormap('flipvik', path)
     
-    plot = True # plot correlation matrices or not
+    # initialize output variables
+    rsq_all = np.zeros((N_zones,N))*np.nan # r-squared
+    sample_size_all = np.zeros(N_zones)*np.nan # sample size
+    y_dh_all = np.zeros((N,25,25,N_zones))*np.nan # partial dependency (anomaly in hot / dry days)
+    y_wc_all = np.zeros((N,25,25,N_zones))*np.nan # partial dependency (anomaly in wet / cold days)
+    y_dc_all = np.zeros((N,25,25,N_zones))*np.nan # partial dependency (anomaly in cold / dry days)
+    y_wh_all = np.zeros((N,25,25,N_zones))*np.nan # partial dependency (anomaly in hot / wet days)
     
-    # loop across climate bins
-    for i in range(0, N_bins):
+    y_h_all = np.zeros((N,25,N_zones))*np.nan # partial dependency (anomaly in hot days)
+    y_d_all = np.zeros((N,25,N_zones))*np.nan # partial dependency (anomaly in dry days)
+    y_c_all = np.zeros((N,25,N_zones))*np.nan # partial dependency (anomaly in cold days)
+    y_w_all = np.zeros((N,25,N_zones))*np.nan # partial dependency (anomaly in wet days)
+            
+    clim_zone_ids = np.sort(df_combined['climate_zone'].unique())
+        
+    # loop across climate zones
+    for i in range(0, N_zones):
+        if i == 0:
+            clim_zone_id = i
+        else:
+            clim_zone_id = clim_zone_ids[i-1]
+        
         # run the function calculate_climate_vs_crop_failures fro each climate bin (i = 1-100) as well as globally (i = 0)
-        y_dh, y_wc, y_wh, y_dc, y_h, y_d, y_c, y_w, rsq, sample_size = calculate_climate_vs_crop_failures(path, crop, model_in, i, climate_bins, crop_data_yield, crop_data_ha, mirca_mask[irrig], vars_all, vars_all_names, clim_years, N_folds, cmap = cmap, plot = plot, N = N)
-              
+        y_dh, y_wc, y_wh, y_dc, y_h, y_d, y_c, y_w, rsq, sample_size = calculate_climate_vs_crop_failures(path, crop, X, y, ha, cell_id, clim_zones, years_all, df_ha_2000, parameters, clim_zone_id, vars_all_names, N_folds, model_type, cmap = cmap, plot = plot, N = N)
+                                                                                           
         y_dh_all[...,i] = y_dh
         y_wc_all[...,i] = y_wc
         y_wh_all[...,i] = y_wh
@@ -1049,10 +1187,15 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
         sample_size_all[i] = sample_size
         
         print('rank: '+str(rank)+' crop: '+crop+' bin: '+str(i)+' finished.')
-    
-    os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out'))
+        sys.stdout.flush()
+
     
     # save the output data
+    os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out'))
+
+    if reduced:
+        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out_reduced'))
+
     np.save('anoms_dh_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+t_src+'_'+sm_src+'_'+model_type+'.pkl', y_dh_all)
     np.save('anoms_wc_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+t_src+'_'+sm_src+'_'+model_type+'.pkl', y_wc_all)
     np.save('anoms_wh_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+t_src+'_'+sm_src+'_'+model_type+'.pkl', y_wh_all)
@@ -1073,23 +1216,7 @@ if __name__== "__main__":
     
     run_location = {'cluster': '/scratch/work/heinom2/',
                     'local_d': 'D:/work/',
-                    'local_c': 'C:/Users/heinom2/'}
-
-# #############################################
-    # path = run_location['local_c']
-    # rank = 3
-    # size = 8
-    # gs = '90'
-    # transformation = 'anom'
-    # t_src = 'temperature'
-    # sm_src = 'soil_moisture_era'
-    # irrig = 'combined'
-    # N = 1
-    # year = 1981
-    # y_src = 'ray'
-    # model_type = 'XGB'
-    # N_bins = 1
-# #############################################
+                    'local_c': 'C:/Users/heinom2/OneDrive - Aalto University/'}
     
     path = run_location['cluster'] # get root path
     
@@ -1097,16 +1224,18 @@ if __name__== "__main__":
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
-    
+
     if rank < 4:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 1)
-        # main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 101)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'ray',    'XGB', 'optimal', 26, True)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'ray',    'XGB', 'optimal', 1, False, reduced = True)
+
     elif rank < 8:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'iizumi', 'XGB', 1)
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'detrended_anom', '90',   100, 'ray',    'XGB', 1)
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_gleam', 'combined', 'anom',           '90',   100, 'ray',    'XGB', 1)   
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           'real', 100, 'ray',    'XGB', 1)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'ray',    'RF',  'optimal', 1, False)
+        
     else:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'RF',  1)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'iizumi', 'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'detrended_anom', '90',   1, 'ray',    'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           'real', 1, 'ray',    'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_gleam', 'combined', 'anom',           '90',   1, 'ray',    'XGB', 'optimal', 1, False)
 
     
