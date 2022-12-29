@@ -7,6 +7,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import statsmodels.api as sm
 
 path = 'C:/Users/heinom2/'
 sys.path.insert(0, path+'OneDrive - Aalto University/research/crop_failures/scripts/crop_failures')
@@ -19,14 +20,14 @@ def plot_rsq_vs_production_and_irrigation(crops, path, tdata, smdata, gs, y_src,
     for crop in crops:
         
         # import results about r2 for the modeling set-up in question
-        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/combined_out'))
+        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022'))
         rsq_all = np.load('rsq_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+tdata+'_'+smdata+'_'+model_type+'.pkl.npy')
     
         # average r2 for each climate zone (zero index contains the global results, and is thus esxcluded)
         rsq_mean = np.mean(rsq_all[1:,:],1)*100
         
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -37,7 +38,7 @@ def plot_rsq_vs_production_and_irrigation(crops, path, tdata, smdata, gs, y_src,
         clim_bin_ids = np.sort(climate_bins_df['climate_zone'].unique()).astype(int)
         
         # calculate production for each grid cell for year 2000, based on ray data (yield * harvested area)
-        crop_data_raster = import_ray_crop_data(path, crop)
+        crop_data_raster = import_ray_crop_data(path+'OneDrive - Aalto University/', crop)
         ha_np = crop_data_raster['harvested_area'].sel(time = 2000).values
         y_np = crop_data_raster['yield'].sel(time = 2000).values
         
@@ -52,7 +53,7 @@ def plot_rsq_vs_production_and_irrigation(crops, path, tdata, smdata, gs, y_src,
         prod_per_bin = prod_per_bin[clim_bin_ids]
         
         # import rainfed and irrigated harvested area (mirca) and calculate total harvested area
-        mirca_rfc, mirca_irc = import_mirca(path, crop, mask = False)
+        mirca_rfc, mirca_irc = import_mirca(path+'OneDrive - Aalto University/', crop, mask = False)
         mirca_rfc[climate_bins_mask] = 0
         mirca_irc[climate_bins_mask] = 0        
         combined = mirca_rfc + mirca_irc
@@ -69,11 +70,38 @@ def plot_rsq_vs_production_and_irrigation(crops, path, tdata, smdata, gs, y_src,
         # calculate percentage of irrigated harvested area for each climate bin
         irrig_perc_per_bin = irc_per_bin / combined_per_bin * 100
         
+        
+        rsq_mean_wconst = sm.add_constant(rsq_mean, prepend=False)
+        
         # scatter plots with regression lines about relationship between r2 and production across climate bins
         ax = sns.regplot(x = prod_per_bin, y = rsq_mean, color = 'black', scatter_kws={'s': 7})
-        ax.set(ylim = [-10, 100])
+        ax.set(ylim = [-10, 100], xlim = [-1.5, prod_per_bin.max()*1.01])
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
+        
+        mod = sm.OLS(prod_per_bin, rsq_mean_wconst)
+        res = mod.fit()
+        slope = res.params[0]
+        intercept = res.params[1]
+        pval = res.f_pvalue
+        s = 'model: ' + str(np.round(slope,2)) + 'x + ' + str(round(intercept,2)) + '\n' + \
+            'p-value: ' + str(np.round(pval,3))
+        
+        ax.text(x=0.0841, y = 0.7, s = s, horizontalalignment='left', transform=ax.transAxes)
+        
+        if crop == 'maize':
+            mod = sm.OLS(prod_per_bin[prod_per_bin < 40], rsq_mean_wconst[prod_per_bin < 40])
+            res = mod.fit()
+            slope = res.params[0]
+            intercept = res.params[1]
+            pval = res.f_pvalue
+            s = 'model: ' + str(np.round(slope,2)) + 'x + ' + str(round(intercept,2)) + '\n' + \
+                'p-value: ' + str(np.round(pval,3))
+            
+            print('Maize')
+            print('Model excluding two largest points:')
+            print(s)
+        
         fig1 = plt.gcf()
         plt.show()
         
@@ -82,6 +110,34 @@ def plot_rsq_vs_production_and_irrigation(crops, path, tdata, smdata, gs, y_src,
         ax.set(ylim = [-10, 100], xlim = [0,100])
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
+        
+        mod = sm.OLS(irrig_perc_per_bin, rsq_mean_wconst)
+        res = mod.fit()
+        slope = res.params[0]
+        intercept = res.params[1]
+        pval = res.f_pvalue
+        s = 'model: ' + str(np.round(slope,2)) + 'x + ' + str(round(intercept,2)) + '\n' + \
+            'p-value: ' + str(np.round(pval,3))
+        
+        ax.text(x=8.41, y = 70, s = s)
+        
+        if crop == 'wheat':
+            print(irrig_perc_per_bin.shape)
+            print(irrig_perc_per_bin[irrig_perc_per_bin < 80].shape)
+            
+            mod = sm.OLS(irrig_perc_per_bin[irrig_perc_per_bin < 80], rsq_mean_wconst[irrig_perc_per_bin < 80])
+            res = mod.fit()
+            slope = res.params[0]
+            intercept = res.params[1]
+            pval = res.f_pvalue
+            s = 'model: ' + str(np.round(slope,2)) + 'x + ' + str(round(intercept,2)) + '\n' + \
+                'p-value: ' + str(np.round(pval,3))
+            
+            print('Wheat')
+            print('Model excluding the largest point:')
+            print(s)
+        
+        
         fig2 = plt.gcf()
         plt.show()
         
@@ -104,7 +160,7 @@ def N_per_bin_box_and_maps_fig(crops, path, tdata, smdata, gs, y_src, irrig, tra
         cmap = get_scico_colormap('bilbao', path+'OneDrive - Aalto University/')
     
         # load sample size data globally and for each climate bin
-        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/combined_out'))
+        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022'))
         sample_size = np.load('sample_size_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+tdata+'_'+smdata+'_'+model_type+'.pkl.npy')
         sample_size_global = sample_size[0]
         sample_size = sample_size[1:]
@@ -129,7 +185,7 @@ def N_per_bin_box_and_maps_fig(crops, path, tdata, smdata, gs, y_src, irrig, tra
         plt.show()
         
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -169,13 +225,13 @@ def rsq_box_and_maps_fig(crops, path, tdata, smdata, gs, y_src, irrig, transform
     for crop in crops:
         
         # define colormap
-        cmap = get_scico_colormap('flipbamako', path+'OneDrive - Aalto University/')
+        cmap = get_scico_colormap('flipbatlow', path+'OneDrive - Aalto University/')
         
         # define color intervals
         clim = (0, 50)
         
         # import results about r2 for the modeling set-up in question
-        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/combined_out'))
+        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022'))
         rsq_all = np.load('rsq_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+tdata+'_'+smdata+'_'+model_type+'.pkl.npy')
         
         # multiply by 100 to transform into percentage
@@ -204,7 +260,7 @@ def rsq_box_and_maps_fig(crops, path, tdata, smdata, gs, y_src, irrig, transform
         plt.show()
                 
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -218,7 +274,7 @@ def rsq_box_and_maps_fig(crops, path, tdata, smdata, gs, y_src, irrig, transform
         df = pd.DataFrame({'r2': rsq_mean, 'bin_id': clim_bin_ids}, columns = ['r2', 'bin_id'])
         
         # plot the tabulated r2 values as a map for each climate zone
-        fig2 = plot_table_to_raster(climate_bins, df, 'r2', clim = clim, scico = 'flipbamako')
+        fig2 = plot_table_to_raster(climate_bins, df, 'r2', clim = clim, scico = 'flipbatlow')
         plt.show()
         
         # exoirt the figures
@@ -245,9 +301,11 @@ def partial_dependence_global_2d_fig(crops, path, tdata, smdata, gs, y_src, extr
         cmap = get_scico_colormap('flipvik', path+'OneDrive - Aalto University/')
         
         # set working folder
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         if reduced == 'reduced':
-            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out_reduced')
+            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out_reduced2022')
+        if reduced == 'incl_clim':
+            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out_incl_clim2022')
         
         # import results about r2 for the modeling set-up in question
         rsq_all = np.load('rsq_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+tdata+'_'+smdata+'_'+model_type+'.pkl.npy')
@@ -288,12 +346,16 @@ def partial_dependence_global_2d_fig(crops, path, tdata, smdata, gs, y_src, extr
         
         # specify the coloring limits and categorization
         levels = np.linspace(-5.0,5.0, num = 41)
+        colors = ['#000000' for i in range(0, levels.shape[0])]
         
         # create a contour plot showing the partial dependence of crop yield anomaly to weather extremes
-        contour = plt.contourf(XX, YY, Z, levels = levels, cmap = cmap, extend = 'both')
-        contour.ax.tick_params(axis = 'y', length=7.5, direction = 'in', width = 5.5)
-        contour.ax.tick_params(axis = 'x', length=7.5, direction = 'in', width = 5.5)
-        contour.ax.set(xticks = [-2, -1, 0, 1, 2], yticks = [-2, -1, 0, 1, 2], xticklabels = [], yticklabels = [])
+        plt.contourf(XX, YY, Z, levels = levels, cmap = cmap, extend = 'both')
+        plt.contour(XX, YY, Z, levels = levels, extend = 'both', colors = colors, linewidths = 0.1)
+
+        ax = plt.gca()
+        ax.tick_params(axis = 'y', length=7.5, direction = 'in', width = 5.5)
+        ax.tick_params(axis = 'x', length=7.5, direction = 'in', width = 5.5)
+        ax.set(xticks = [-2, -1, 0, 1, 2], yticks = [-2, -1, 0, 1, 2], xticklabels = [], yticklabels = [])
         fig1 = plt.gcf()
         plt.show()
 
@@ -301,6 +363,8 @@ def partial_dependence_global_2d_fig(crops, path, tdata, smdata, gs, y_src, extr
         os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/figs2021'))
         if reduced == 'reduced':
             os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/figs2021_reduced')
+        if reduced == 'incl_clim':
+            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/figs2021_incl_clim')
         
         fig1.savefig(crop+'_'+y_src+'_'+tdata+'_'+smdata+'_'+gs+'_'+transformation+'_'+model_type+'_'+extr_type+'_'+irrig+'_partial_dependency.png',bbox_inches='tight')
 
@@ -320,7 +384,7 @@ def partial_dependence_global_2d_fig(crops, path, tdata, smdata, gs, y_src, extr
             
 def partial_dependency_global_violin_fig(crops, path, tdata, smdata, gs, y_src, irrig, transformation, std_lim, model_type, reduced = 'not reduced'):
     
-    os.chdir(path+r'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+    os.chdir(path+r'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
     
     # loop across crop types
     for crop in crops:
@@ -328,9 +392,13 @@ def partial_dependency_global_violin_fig(crops, path, tdata, smdata, gs, y_src, 
         def import_and_filter_anoms(extr_type, crop, y_src, gs, irrig, transformation, std_lim):
             
             # set working folder
-            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
             if reduced == 'reduced':
-                os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out_reduced')
+                os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out_reduced2022')
+            if reduced == 'incl_clim':
+                os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out_incl_clim2022')
+                
+                
             
             # import partial dependence estimates for the climate scenario in question
             anom_data_both = np.load('anoms_'+extr_type+'_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+tdata+'_'+smdata+'_'+model_type+'.pkl.npy')
@@ -401,6 +469,8 @@ def partial_dependency_global_violin_fig(crops, path, tdata, smdata, gs, y_src, 
         ax.set(ylim = [-6.25, 1.55], yticks = np.array([-5, -2.5, 0]), xticks = np.arange(1,len(labels)+1))
         if reduced == 'reduced':
             ax.set(ylim = [-8.25, 1.55], yticks = np.array([-7.5, -5, -2.5, 0]), xticks = np.arange(1,len(labels)+1))
+        if reduced == 'incl_clim':
+            ax.set(ylim = [-8.25, 1.55], yticks = np.array([-7.5, -5, -2.5, 0]), xticks = np.arange(1,len(labels)+1))
         
         if crop == 'wheat':
             labels = ax.set_xticklabels(list_to_labels, fontsize = 16, color = 'black')
@@ -419,6 +489,9 @@ def partial_dependency_global_violin_fig(crops, path, tdata, smdata, gs, y_src, 
         os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/figs2021'))
         if reduced == 'reduced':
             os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/figs2021_reduced')
+        if reduced == 'incl_clim':
+            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/figs2021_incl_clim')
+            
         fig1.savefig(crop+'_'+y_src+'_'+tdata+'_'+smdata+'_'+gs+'_'+transformation+'_'+model_type+'_'+irrig+'_'+str(std_lim)+'_violins.png',bbox_inches='tight')
         
         
@@ -434,7 +507,7 @@ def partial_dependency_local_2d_fig(crops, path, tdata, smdata, gs, y_src, extr_
         clim = (-7.5,7.5)
         
         # import results from the partial dependence calculations for the model set-up in question
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         anom_data = np.load('anoms_'+extr_type+'_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+tdata+'_'+smdata+'_'+model_type+'.pkl.npy')
     
         # import results about r2 for the modeling set-up in question
@@ -510,7 +583,7 @@ def partial_dependency_local_2d_fig(crops, path, tdata, smdata, gs, y_src, extr_
         plt.show()
                       
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -647,7 +720,7 @@ def clim_trend_v2(crops, path, gs, extr_type, irrig, sm_src, t_src):
             
             
             # import climate bins array
-            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+            os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
             climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+t_src+'_'+sm_src+'_'+irrig+'_anom_'+gs+'.csv')
             climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
             
@@ -691,7 +764,7 @@ def visualize_climate_bins(path, crops, y_src, tdata, smdata, irrig, transformat
     for crop in crops:
         
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -745,6 +818,7 @@ def visualize_climate_bins(path, crops, y_src, tdata, smdata, irrig, transformat
         
         # plot the climate bins on a global map        
         plt.pcolormesh(lons, lats, climate_bins, transform=ccrs.PlateCarree(), cmap = cmap)
+        ax.coastlines(linewidth = 0.5)
         # cbar = plt.colorbar(orientation = 'horizontal', fraction=0.046, pad=0.04)
         fig1 = plt.gcf()
         plt.show()
@@ -784,7 +858,7 @@ def visualize_quantile_thresholds(crops, path, gs, extr_type, irrig, sm_src, t_s
         print(crop+', total time elapsed in the function: '+ str(time_elapsed))
         
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+t_src+'_'+sm_src+'_'+irrig+'_anom_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -834,6 +908,7 @@ def visualize_quantile_thresholds(crops, path, gs, extr_type, irrig, sm_src, t_s
             
             # plot the values on a global map        
             plt.pcolormesh(lons, lats, data, transform=ccrs.PlateCarree(), norm = clim, cmap = cmap)
+            ax.coastlines(linewidth = 0.5)
             fig = plt.gcf()
             # plt.colorbar()
             
@@ -873,7 +948,7 @@ def visualize_quantile_thresholds(crops, path, gs, extr_type, irrig, sm_src, t_s
 
             plt.savefig('colorbar_SM_threshold.png', dpi = 300, bbox_inches='tight')
             plt.show()
-            
+    
 
 def plt_correlation_matrix(y_src, crops, tdata, smdata, irrig, transformation, gs):
     
@@ -881,7 +956,7 @@ def plt_correlation_matrix(y_src, crops, tdata, smdata, irrig, transformation, g
     
     for crop in crops:
         
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         df_combined = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         
         
@@ -906,7 +981,7 @@ def plt_correlation_matrix(y_src, crops, tdata, smdata, irrig, transformation, g
         );
     
         ax.tick_params(length=0)        
-        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/shap_and_cor_figs2021'))
+        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/shap_and_cor_figs2022'))
         plt.savefig(crop+'_correlation_matrix.png', dpi = 300, bbox_inches = 'tight')
         plt.show()
         
@@ -934,7 +1009,7 @@ def variability_vs_explained(y_src, crops, tdata, smdata, irrig, transformation,
     for crop in crops:
         # for global data, calculate a correlation matrix
         
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         df_combined = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         
         df_combined = df_combined[['Crop yield anomaly', 'climate_zone','harvested_area','year']]
@@ -976,7 +1051,7 @@ def variability_vs_explained(y_src, crops, tdata, smdata, irrig, transformation,
         plt.show()
         
         # import climate bins array
-        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out')
+        os.chdir(path+ 'OneDrive - Aalto University/research/crop_failures/results/combined_out2022')
         climate_bins_df = pd.read_csv(y_src+'_'+crop+'_'+tdata+'_'+smdata+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
         climate_bins_df = climate_bins_df.loc[climate_bins_df['year'] == 2000]
         
@@ -1008,7 +1083,46 @@ def variability_vs_explained(y_src, crops, tdata, smdata, irrig, transformation,
             cbar.set_label('standard deviation of crop yield anomalies (%)', fontsize=12)
             plt.savefig('colobar_std.png', dpi = 300, bbox_inches='tight')
             plt.close()
-       
+            
+            
+def extr_scatter(y_src, crops, tdata, smdata, irrig, transformation, gs):
+    
+    
+    from matplotlib.patches import Rectangle
+    
+    for crop in crops:
+        
+        os.chdir(r'C:\Users\heinom2\OneDrive - Aalto University\research\crop_failures\results\combined_out2022')
+        df = pd.read_csv(f'{y_src}_{crop}_{tdata}_{smdata}_{irrig}_{transformation}_{gs}.csv')
+        
+        fig, ax = plt.subplots(1, figsize = (5,5))
+        ax.scatter(x=df['Dry days'], y = df['Hot days'], alpha = 0.5, s = 20, color = 'black', marker = '.')
+        ax.set_xlim([-4,4])
+        ax.set_ylim([-4,4])
+        ax.add_patch(Rectangle((-2.25, -2.25), 4.5, 4.5, linewidth=3, edgecolor='r', facecolor='none'))
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/figs2021'))
+        fig.savefig(crop+'_'+y_src+'_'+tdata+'_'+smdata+'_'+transformation+'_'+irrig+'_dh_extreme_scatters.png',bbox_inches='tight')
+        plt.show()
+        
+        
+        fig, ax = plt.subplots(1, figsize = (5,5))
+        ax.scatter(x=df['Wet days'], y = df['Cold days'], alpha = 0.5, s = 20, color = 'black', marker = '.')
+        ax.set_xlim([-4,4])
+        ax.set_ylim([-4,4])
+        ax.add_patch(Rectangle((-2.25, -2.25), 4.5, 4.5, linewidth=3, edgecolor='r', facecolor='none'))
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        os.chdir(os.path.join(path, 'OneDrive - Aalto University/research/crop_failures/results/figs2021'))
+        fig.savefig(crop+'_'+y_src+'_'+tdata+'_'+smdata+'_'+transformation+'_'+irrig+'_wc_extreme_scatters.png',bbox_inches='tight')
+        plt.show()
+        
+
     
 path = 'C:/Users/heinom2/'
 gs = '90'
@@ -1021,6 +1135,8 @@ t_src = 'temperature'
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'anom', 1.5, 'XGB')
 
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'anom', 1.5, 'XGB', 'reduced')
+partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'anom', 1.5, 'XGB', 'incl_clim')
+
 
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'anom', 1.5, 'RF')
 partial_dependency_global_violin_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, irrig, 'detrended_anom', 1.5, 'XGB')
@@ -1034,6 +1150,9 @@ partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_
 
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', irrig, 'anom', 'XGB', 'reduced')
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', irrig, 'anom', 'XGB', 'reduced')
+
+partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', irrig, 'anom', 'XGB', 'incl_clim')
+partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', irrig, 'anom', 'XGB', 'incl_clim')
 
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'dh', irrig, 'anom', 'RF')
 partial_dependence_global_2d_fig(crops, path, t_src, 'soil_moisture_era', gs, y_src, 'wc', irrig, 'anom', 'RF')
@@ -1077,3 +1196,10 @@ visualize_quantile_thresholds(crops, path, gs, 'wc', irrig, 'soil_moisture_era',
 plt_correlation_matrix(y_src, crops, t_src, 'soil_moisture_era', irrig, 'anom', gs)
 
 variability_vs_explained(y_src, crops, t_src, 'soil_moisture_era', irrig, 'anom', gs, 'XGB')
+
+extr_scatter(y_src, crops, tdata, smdata, irrig, transformation, gs)
+
+
+
+
+

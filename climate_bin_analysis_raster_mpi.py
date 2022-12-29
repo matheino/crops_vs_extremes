@@ -464,14 +464,22 @@ def obtain_clim_ref(dtype, gs, crop, irrig, years, perc_max, perc_min, path):
     # find the the percentile threshold for the scenario in question
     data_bool = data_cumulative_digitized == dig_v[0]
     
-    # find the the percentile threshold for the reference scenario
+    # find the percentile threshold for the reference scenario
     data_bool_ref = data_cumulative_digitized == dig_v[1]
     
-    mask_ref = data_bool_ref.sum(2) == 0
+    # find the areas where percentiles could not be reliably quantified
+    data_main = data/years.shape[0]
+    data_ref = data/years.shape[0]
+
+    data_main[~data_bool] = 0
+    data_ref[~data_bool_ref] = 0
+    
+    mask_main = np.all([data_main.sum(2) > 5, data_main.sum(2) < 20], axis = 0)
+    mask_ref = np.all([data_ref.sum(2) > 5, data_main.sum(2) < 20], axis = 0)
     
     # mask the binned data for the scenario
-    data_bool[mask_ref, ...] = False
-    
+    data_bool[~mask_ref, ...] = False
+    data_bool[~mask_main,...] = False
     mask_out = data_bool.sum(2) == 0
     
     # calculate rasters for percentile limits
@@ -490,18 +498,18 @@ def number_of_days_vs_ref(path, dtype, gs, crop, years, irrig, stdz, perc_max = 
     filename = stdz+'_'+dtype+'_'+str(gs)+'_'+crop+'_'+irrig+'_'+str(perc_min)+'_to_'+str(perc_max)+'.pkl.lzma'
     
     # if only the data array is imported and it already exist, import from file
-    if filename in os.listdir(os.path.join(path, 'research/crop_failures/data/annual_bins_jan2021')) and not return_ref:
-        os.chdir(os.path.join(path, 'research/crop_failures/data/annual_bins_jan2021'))
+    if filename in os.listdir(os.path.join(path, 'research/crop_failures/data/annual_bins_2022')) and not return_ref:
+        os.chdir(os.path.join(path, 'research/crop_failures/data/annual_bins_2022'))
         return pickle.load(lzma.open(filename,'rb'))
     
     # get reference data for the whole time period and percentile limits, defined by perc_min and perc_max     
     ref_bin_bool, bin_min, bin_max, mask = obtain_clim_ref(dtype, gs, crop, irrig, years, perc_max, perc_min, path)
     
     # if the data already exist and also the metadata of the binned data (i.e. bin limits) is imported
-    if filename in os.listdir(os.path.join(path, 'research/crop_failures/data/annual_bins_jan2021')) and return_ref:
-        os.chdir(os.path.join(path, 'research/crop_failures/data/days_per_bin_raster'))
+    if filename in os.listdir(os.path.join(path, 'research/crop_failures/data/annual_bins_2022')) and return_ref:
+        os.chdir(os.path.join(path, 'research/crop_failures/data/annual_bins_2022'))
         return pickle.load(lzma.open(filename,'rb')), bin_min, bin_max
-    
+        
     days_summed_out = []
     # loop across all years
     for year in years:
@@ -513,6 +521,9 @@ def number_of_days_vs_ref(path, dtype, gs, crop, years, irrig, stdz, perc_max = 
         days_summed_out.append(days_per_bin.sum(axis = 2))
         
     days_summed_out = np.stack(days_summed_out, axis = 2)
+        
+    if 'soil_moisture' in dtype:
+        days_summed_out = np.sqrt(days_summed_out)
     
     # if the output is set to be an anomaly calculate the z-score of the data
     if stdz == 'anom':
@@ -521,7 +532,7 @@ def number_of_days_vs_ref(path, dtype, gs, crop, years, irrig, stdz, perc_max = 
     # if the output is set to be an detrended anomaly, detrend the data and then calculate a z-score
     elif stdz == 'detrended_anom':
         days_summed_out = detrend(days_summed_out, axis = 2, type = 'linear')
-        days_summed_out = (days_summed_out - np.nanmean(days_summed_out, axis = 2)[:,:,np.newaxis]) / (np.nanstd(days_summed_out, axis  = 2)[:,:,np.newaxis])        
+        days_summed_out = (days_summed_out - np.nanmean(days_summed_out, axis = 2)[:,:,np.newaxis]) / (np.nanstd(days_summed_out, axis  = 2)[:,:,np.newaxis])                
     
     # set masked areas to nan
     days_summed_out[mask, ...] = np.nan
@@ -531,7 +542,7 @@ def number_of_days_vs_ref(path, dtype, gs, crop, years, irrig, stdz, perc_max = 
     days_summed_out[any_is_nan, ...] = np.nan
 
     # save data for future use    
-    os.chdir(os.path.join(path, 'research/crop_failures/data/annual_bins_jan2021'))
+    os.chdir(os.path.join(path, 'research/crop_failures/data/annual_bins_2022'))
     pickle.dump(days_summed_out, lzma.open(filename, 'wb' ))
     
     if return_ref:
@@ -680,7 +691,7 @@ def model_with_optimal_hyperparameters(X, y, ha, years_all, model_type, N_folds,
     
     # initialize the models
     model_dict = {'XGB': xgb.XGBRegressor(base_score=0.5, booster='gbtree', importance_type = 'gain',
-                                          missing = None, n_jobs = 1, nthreads = None, random_state = 0,
+                                          missing=np.nan, n_jobs = 1, nthreads = None,
                                           seed = None),
                   'RF':  RandomForestRegressor() }
     
@@ -698,7 +709,7 @@ def model_with_optimal_hyperparameters(X, y, ha, years_all, model_type, N_folds,
 
         parameters = {
           'objective':['reg:squarederror'],
-          'learning_rate': [0.1],
+          'eta': [0.1],
           'n_estimators': [400],
           'max_depth': [3],
           'min_child_weight': [1],
@@ -1003,15 +1014,15 @@ def calculate_climate_vs_crop_failures(path,
         # calculate r-squared (i.e. squared correlation coeffcient) multiplied with the sign of the original correlation in case the relationship is negative
         rsq_temp = np.corrcoef(out['y_tot'], out['y_tot_pred'])[0,1]**2 * np.sign(np.corrcoef(out['y_tot'], out['y_tot_pred'])[0,1])
         
-#        plt.scatter(y, y_pred_all, alpha = 0.005)
-#        plt.title(np.corrcoef(y, y_pred_all)[0,1])
-#        plt.show()
-#        plt.close()
-#        
-#        plt.scatter(out['y_tot'], out['y_tot_pred'])
-#        plt.title(rsq_temp)
-#        plt.show()
-#        plt.close()
+        # plt.scatter(y, y_pred_all, alpha = 0.005)
+        # plt.title(np.corrcoef(y, y_pred_all)[0,1])
+        # plt.show()
+        # plt.close()
+        
+        # plt.scatter(out['y_tot'], out['y_tot_pred'])
+        # plt.title(rsq_temp)
+        # plt.show()
+        # plt.close()
         
         # save r-squared value to a list
         rsq.append(rsq_temp)
@@ -1022,7 +1033,7 @@ def calculate_climate_vs_crop_failures(path,
         shap_values_out = np.vstack(shap_values_out)
     
         # set directory
-        os.chdir(os.path.join(path, 'research/crop_failures/results/shap_and_cor_figs2021'))
+        os.chdir(os.path.join(path, 'research/crop_failures/results/shap_and_cor_figs2022'))
     
         # shap dependence plot for hot and dry days
         shap.dependence_plot("Hot days", shap_values_out, pd_eval_out, interaction_index="Dry days", show = False)
@@ -1069,7 +1080,7 @@ def calculate_climate_vs_crop_failures(path,
     return y_dh_out, y_wc_out, y_wh_out, y_dc_out, y_h_out, y_d_out, y_c_out, y_w_out, rsq_out, sample_size
 
 
-def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_src, model_type, parameters, N_zones, plot, reduced = False):
+def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_src, model_type, parameters, N_zones, plot, reduced = False, incl_climate_params = False):
     
     sys.path.insert(0, path+'research/crop_failures/scripts/crop_failures')
     from general_functions import get_scico_colormap
@@ -1091,7 +1102,7 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
     # import average climate data for climate zoning
     T_tot = import_other_clim_data('Tavg', '90', crop,irrig, 'no_transformation', path) # average growing season temperature
     P_tot = import_other_clim_data('P_year', '90', crop,irrig, 'no_transformation', path) # total growing season precipitation
-    
+        
     # import reference climatological data
     sm_mean = import_other_clim_data(sm_src + '_mean', gs, crop,irrig, 'detrended_anom', path) # average growing season soil moisture
     t_mean = import_other_clim_data('Tavg', gs, crop,irrig, 'detrended_anom', path) # average growing season temperature
@@ -1110,9 +1121,15 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
     if reduced:
         vars_all = [T_09_10, SM_09_10, T_00_01, SM_00_01]
         vars_all_names = ['Hot days','Dry days','Cold days','Wet days']
-    else:
+    if incl_climate_params:
+        P_clim = np.tile(np.nanmean(P_tot,2)[:,:,None], (1, 1, T_09_10.shape[2]))
+        T_clim = np.tile(np.nanmean(T_tot,2)[:,:,None], (1, 1, T_09_10.shape[2]))
+        vars_all = [T_09_10, SM_09_10, T_00_01, SM_00_01, sm_mean[:,:,:-1], t_mean[:,:,:-1], P_year[:,:,:-1], P_gs[:,:,:-1], P_clim, T_clim]
+        vars_all_names = ['Hot days','Dry days','Cold days','Wet days','Soil moisture','Temperature','Precipitation (yearly)','Precipitation', 'Climatological Precipitation', 'Climatological Temperature']
+    elif not reduced and not incl_climate_params:
         vars_all = [T_09_10, SM_09_10, T_00_01, SM_00_01, sm_mean[:,:,:-1], t_mean[:,:,:-1], P_year[:,:,:-1], P_gs[:,:,:-1]]
         vars_all_names = ['Hot days','Dry days','Cold days','Wet days','Soil moisture','Temperature','Precipitation (yearly)','Precipitation']
+    
     print('Climate data finished: '+ str(rank))
     sys.stdout.flush()
     
@@ -1127,10 +1144,10 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
     df_combined = combine_data_to_dataframe(crop_data_yield, crop_data_ha, vars_all, vars_all_names, T_tot, P_tot, mirca_mask[irrig], clim_years)
     
     # save dataframe if run is for all variables
-    if not reduced:
-        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out'))
+    if not reduced and not incl_climate_params:
+        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out2022'))
         df_combined.to_csv(y_src+'_'+crop+'_'+t_src+'_'+sm_src+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
-    
+        
     # select variables to include in the regression
     # change dataframe to numpy array    
     y = df_combined['Crop yield anomaly'].values # target variable (de-trended crop yield)
@@ -1143,9 +1160,8 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
 
     # define how many temporal splits are made in the training-prediction procedure
     N_folds = 4
-    
+
     # define plotting setup
-    plot = False
     cmap = get_scico_colormap('flipvik', path)
     
     # initialize output variables
@@ -1189,12 +1205,14 @@ def main(path, comm, size, rank, t_src, sm_src, irrig, transformation, gs, N, y_
         print('rank: '+str(rank)+' crop: '+crop+' bin: '+str(i)+' finished.')
         sys.stdout.flush()
 
-    
     # save the output data
-    os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out'))
+    os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out2022'))
 
     if reduced:
-        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out_reduced'))
+        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out_reduced2022'))
+    if incl_climate_params:
+        os.chdir(os.path.join(path, 'research/crop_failures/results/combined_out_incl_clim2022'))
+        df_combined.to_csv(y_src+'_'+crop+'_'+t_src+'_'+sm_src+'_'+irrig+'_'+transformation+'_'+gs+'.csv')
 
     np.save('anoms_dh_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+t_src+'_'+sm_src+'_'+model_type+'.pkl', y_dh_all)
     np.save('anoms_wc_'+crop+'_'+y_src+'_'+gs+'_'+irrig+'_'+transformation+'_'+t_src+'_'+sm_src+'_'+model_type+'.pkl', y_wc_all)
@@ -1224,18 +1242,23 @@ if __name__== "__main__":
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
+    
+    # rank = 0
+    # path = run_location['local_c']
+    # size = 0
+    # comm = 0
 
     if rank < 4:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'ray',    'XGB', 'optimal', 26, True)
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'ray',    'XGB', 'optimal', 1, False, reduced = True)
-
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 'optimal', 26, True)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 'optimal', 1,  False, reduced = True)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 'optimal', 1,  False, incl_climate_params = True)
+        
     elif rank < 8:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'ray',    'RF',  'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'RF',  'optimal', 1, False)
         
     else:
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   1, 'iizumi', 'XGB', 'optimal', 1, False)
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'detrended_anom', '90',   1, 'ray',    'XGB', 'optimal', 1, False)
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           'real', 1, 'ray',    'XGB', 'optimal', 1, False)
-        main(path, comm, size, rank, 'temperature', 'soil_moisture_gleam', 'combined', 'anom',           '90',   1, 'ray',    'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'iizumi', 'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'detrended_anom', '90',   100, 'ray',    'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           'real', 100, 'ray',    'XGB', 'optimal', 1, False)
+        main(path, comm, size, rank, 'temperature', 'soil_moisture_gleam', 'combined', 'anom',           '90',   100, 'ray',    'XGB', 'optimal', 1, False)
 
-    
