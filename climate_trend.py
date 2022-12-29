@@ -19,7 +19,7 @@ def clim_trend_v2(path, rank, t_src, sm_src, irrig, gs, plot_all, only_log_odds)
     
     # import dataframe with climate data
     y_src = 'ray'
-    os.chdir(path+ 'research/crop_failures/results/combined_out')
+    os.chdir(path+ 'research/crop_failures/results/combined_out2022')
     climate_data_df = pd.read_csv(y_src+'_'+crop+'_'+t_src+'_'+sm_src+'_'+irrig+'_anom_'+gs+'.csv')
 
     threshold = 1.5
@@ -29,14 +29,14 @@ def clim_trend_v2(path, rank, t_src, sm_src, irrig, gs, plot_all, only_log_odds)
     # select the cimate scenario (dry-hot or wet-cold)        
     if clim == 'dh':
         columns = ['cell_id','year','climate_zone', 'Hot days','Dry days']
-        df_long = climate_data_df[columns]
+        df_long = climate_data_df[columns].copy()
         df_long['T'] = df_long['Hot days'] > threshold
         df_long['SM'] = df_long['Dry days'] > threshold
         
         
     elif clim == 'wc':
         columns = ['cell_id','year','climate_zone', 'Cold days','Wet days']
-        df_long = climate_data_df[columns]
+        df_long = climate_data_df[columns].copy()
         df_long['T'] = df_long['Cold days'] > threshold
         df_long['SM'] = df_long['Wet days'] > threshold
     
@@ -170,7 +170,7 @@ def clim_trend_v2(path, rank, t_src, sm_src, irrig, gs, plot_all, only_log_odds)
             
             if i == 0:
                 fig = plot_clim_trend(years, df_Xy, probs, est, dtype, i, est_list = est_list)
-                os.chdir(path+'research/crop_failures/results/climate_trend_2021')
+                os.chdir(path+'research/crop_failures/results/climate_trend2022')
                 fig.savefig(crop+'_'+clim+'_'+sm_src+'_'+t_src+'_'+dtype+'_'+'15std'+'_clim_trend_logistic.png', dpi = 300, bbox_inches='tight')
                 plt.close()
                 
@@ -212,7 +212,7 @@ def clim_trend_v2(path, rank, t_src, sm_src, irrig, gs, plot_all, only_log_odds)
         sample_size_dict[dtype] = sample_size
                     
     # export results as dictionaries
-    os.chdir(path+'research/crop_failures/results/climate_trend_2021')
+    os.chdir(path+'research/crop_failures/results/climate_trend2022')
     pickle.dump(model_pval_dict, lzma.open(crop+'_'+clim+'_'+sm_src+'_'+t_src+'_model_pval_v2.pkl.lzma', 'wb'))
     pickle.dump(coef_dict, lzma.open(crop+'_'+clim+'_'+sm_src+'_'+t_src+'_coef_v2.pkl.lzma', 'wb'))
     pickle.dump(coef_pval_dict, lzma.open(crop+'_'+clim+'_'+sm_src+'_'+t_src+'_coef_pval_v2.pkl.lzma', 'wb'))

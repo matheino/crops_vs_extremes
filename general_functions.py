@@ -139,7 +139,9 @@ def plot_table_to_raster(raster_info, df, var, lon_ext = (-180, 180), lat_ext = 
             cbar = plt.colorbar(orientation = 'horizontal', fraction=0.046, pad=0.04, extend='max')
             cbar.set_label(label_name, fontsize = 14)
             plt.title(label = title, fontsize = 16)
-            plt.tight_layout()    
+            plt.tight_layout()
+            
+    ax.coastlines(linewidth = 0.5)
         
     return plt.gcf()
 
