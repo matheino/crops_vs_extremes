@@ -470,13 +470,17 @@ def obtain_clim_ref(dtype, gs, crop, irrig, years, perc_max, perc_min, path):
     # find the areas where percentiles could not be reliably quantified
     data_main = data/years.shape[0]
     data_ref = data/years.shape[0]
-
+    
+    if gs == 'real':
+        data_main = data_main/data_main.sum(2)[:,:,None]*90
+        data_ref = data_ref/data_ref.sum(2)[:,:,None]*90
+    
     data_main[~data_bool] = 0
     data_ref[~data_bool_ref] = 0
     
     mask_main = np.all([data_main.sum(2) > 5, data_main.sum(2) < 20], axis = 0)
     mask_ref = np.all([data_ref.sum(2) > 5, data_main.sum(2) < 20], axis = 0)
-    
+        
     # mask the binned data for the scenario
     data_bool[~mask_ref, ...] = False
     data_bool[~mask_main,...] = False
@@ -1242,11 +1246,6 @@ if __name__== "__main__":
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
-    
-    # rank = 0
-    # path = run_location['local_c']
-    # size = 0
-    # comm = 0
 
     if rank < 4:
         main(path, comm, size, rank, 'temperature', 'soil_moisture_era',   'combined', 'anom',           '90',   100, 'ray',    'XGB', 'optimal', 26, True)
